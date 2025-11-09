@@ -335,3 +335,165 @@ def find_all_neighbors_by_surface_distance_optimized(
         print(f"  Mean distance: {non_touching_df['surface_distance_um'].mean():.3f} μm")
     
     return neighbor_df
+
+## Surface-to-surface distance
+
+def compute_surface_to_surface_distance_optimized(
+    mask_3d: np.ndarray, 
+    cell_a_id: int, 
+    cell_b_id: int, 
+    voxel_size_um: tuple,
+    max_distance_um: float = float('inf')
+) -> float:
+    mask_a = (mask_3d == cell_a_id)
+    mask_b = (mask_3d == cell_b_id)
+    
+    if not mask_a.any() or not mask_b.any():
+        return float('inf')
+    
+    surface_a = mask_a & ~binary_erosion(mask_a)
+    surface_b = mask_b & ~binary_erosion(mask_b)
+    
+    if not surface_a.any() or not surface_b.any():
+        return float('inf')
+    
+    # Step 1: Compute bounding box and halo
+    bbox_with_halo = compute_bounding_box_with_halo(surface_a, max_distance_um, voxel_size_um)
+    
+    if bbox_with_halo is None:
+        return float('inf')
+    
+    # Step 2: Slice both arrays into the cropped subvolume
+    slice_z, slice_y, slice_x = bbox_with_halo
+    surface_a_crop = surface_a[slice_z, slice_y, slice_x]
+    surface_b_crop = surface_b[slice_z, slice_y, slice_x]
+    
+    if not surface_b_crop.any():
+        return float('inf')
+    
+    # Step 3: Run EDT on the cropped region
+    dist_transform_crop = distance_transform_edt(~surface_a_crop, sampling=voxel_size_um)
+    
+    # Step 4: Read minimum distance from cropped EDT result
+    min_distance = dist_transform_crop[surface_b_crop].min()
+    return min_distance
+
+def compute_surface_distances_batch_optimized(
+    global_surface: np.ndarray,
+    cell_pairs: List[Tuple[int, int]],
+    voxel_size_um: tuple,
+    max_distance_um: float,
+    cells_df: pd.DataFrame,
+    mask_3d: np.ndarray,
+    all_bboxes_with_halo: Dict[int, Tuple[slice, slice, slice]],
+    n_jobs: int = 1
+) -> List[Dict[str, Any]]:
+    from collections import defaultdict
+    from joblib import Parallel, delayed
+    
+    print("Computing surface distances for unique crop regions...")
+    print(f"Processing {len(cell_pairs)} cell pairs with max_distance_um = {max_distance_um}")
+    
+    # Step 1: Identify all unique crop regions needed
+    print("Step 1: Identifying unique crop regions...")
+    unique_crops = set()
+    cell_to_crop_tuple = {}
+    
+    for cell_a_id, cell_b_id in cell_pairs:
+        if cell_a_id in all_bboxes_with_halo:
+            crop_slice = all_bboxes_with_halo[cell_a_id]
+            crop_tuple = (crop_slice[0].start, crop_slice[0].stop, 
+                         crop_slice[1].start, crop_slice[1].stop,
+                         crop_slice[2].start, crop_slice[2].stop)
+            unique_crops.add(crop_tuple)
+            cell_to_crop_tuple[cell_a_id] = crop_tuple
+    
+    total_cells = len(set(pair[0] for pair in cell_pairs if pair[0] in all_bboxes_with_halo))
+    print(f"   ✓ Found {len(unique_crops)} unique crop regions")
+    print(f"   ✓ Reduced from {total_cells} per-cell EDTs to {len(unique_crops)} global EDTs")
+    print(f"   ✓ Expected speedup: ~{total_cells // max(len(unique_crops), 1)}x fewer EDT computations")
+    
+    # Step 2: Pre-compute EDTs for each unique crop region
+    print(f"Step 2: Computing EDTs for {len(unique_crops)} unique crop regions...")
+    crop_edts = {}
+    
+    def compute_crop_edt(crop_tuple):
+        z_start, z_stop, y_start, y_stop, x_start, x_stop = crop_tuple
+        crop_slice = (slice(z_start, z_stop), slice(y_start, y_stop), slice(x_start, x_stop))
+        
+        mask_crop = mask_3d[crop_slice]
+        global_surface_crop = global_surface[crop_slice]
+        
+
+        dist_transform = distance_transform_edt(~global_surface_crop, sampling=voxel_size_um)
+        return crop_tuple, dist_transform, mask_crop, global_surface_crop
+    
+    if n_jobs == 1:
+        # Sequential EDT computation
+        pbar = tqdm(unique_crops, desc="Computing EDTs for unique crop regions", 
+                   unit="crops", ncols=100, leave=True, mininterval=0.1, maxinterval=1.0)
+        for crop_tuple in pbar:
+            crop_tuple, dist_transform, mask_crop, global_surface_crop = compute_crop_edt(crop_tuple)
+            crop_edts[crop_tuple] = {
+                'dist_transform': dist_transform,
+                'mask_crop': mask_crop,
+                'global_surface_crop': global_surface_crop
+            }
+    else:
+        # Parallel EDT computation
+        print(f"Computing EDTs with {n_jobs} parallel jobs...")
+        pbar = tqdm(unique_crops, desc="Computing EDTs for unique crop regions in parallel", 
+                   unit="crops", ncols=100, leave=True, mininterval=0.1, maxinterval=1.0)
+        results_list = Parallel(n_jobs=n_jobs)(
+            delayed(compute_crop_edt)(crop_tuple) 
+            for crop_tuple in pbar
+        )
+        
+        for crop_tuple, dist_transform, mask_crop, global_surface_crop in results_list:
+            crop_edts[crop_tuple] = {
+                'dist_transform': dist_transform,
+                'mask_crop': mask_crop,
+                'global_surface_crop': global_surface_crop
+            }
+    
+    print(f"Completed EDT computations for all {len(crop_edts)} unique crop regions")
+    
+    # Step 3: Extract distances for specific cell pairs
+    print("Step 3: Extracting surface-surface distances for all cell pairs...")
+    results = []
+    cell_type_map = dict(zip(cells_df['cell_id'], cells_df['cell_type']))
+    
+    pbar = tqdm(cell_pairs, desc="Extracting distances from pre-computed EDTs", 
+               unit="pairs", ncols=100, leave=True, mininterval=0.1, maxinterval=1.0)
+    
+    for cell_a_id, cell_b_id in pbar:
+        if cell_a_id not in cell_to_crop_tuple:
+            continue
+            
+        crop_tuple = cell_to_crop_tuple[cell_a_id]
+        crop_data = crop_edts[crop_tuple]
+        
+        dist_transform = crop_data['dist_transform']
+        mask_crop = crop_data['mask_crop']
+        global_surface_crop = crop_data['global_surface_crop']
+        
+        surface_a_indices = (mask_crop == cell_a_id) & global_surface_crop
+        surface_b_indices = (mask_crop == cell_b_id) & global_surface_crop
+        
+        if surface_a_indices.any() and surface_b_indices.any():
+            min_distance = dist_transform[surface_b_indices].min()
+            
+            if min_distance <= max_distance_um:
+                results.append({
+                    'cell_id_a': cell_a_id,
+                    'cell_id_b': cell_b_id,
+                    'cell_type_a': cell_type_map.get(cell_a_id, 'Unknown'),
+                    'cell_type_b': cell_type_map.get(cell_b_id, 'Unknown'),
+                    'surface_distance_um': min_distance
+                })
+        
+        if pbar.n % 1000 == 0:  # Update every 1000 iterations
+            pbar.refresh()
+    
+    print(f"Found {len(results)} near-neighbor pairs within {max_distance_um} μm")
+    return results
