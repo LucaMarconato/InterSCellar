@@ -1889,3 +1889,16 @@ def export_interscellar_volumes_to_anndata(
         traceback.print_exc()
         return None
 
+## Utility
+
+def save_surfaces_to_pickle(surfaces: Dict[int, np.ndarray], filepath: str = "cell_surfaces.pkl") -> None:
+    with open(filepath, "wb") as f:
+        pickle.dump(surfaces, f)
+    print(f"Cell surfaces saved to pickle file: {filepath}")
+
+def load_surfaces_from_pickle(filepath: str = "cell_surfaces.pkl") -> Dict[int, np.ndarray]:
+    with open(filepath, "rb") as f:
+        surfaces = pickle.load(f)
+    print(f"Loaded surfaces for {len(surfaces)} cells from pickle file: {filepath}")
+    return surfaces
+    
