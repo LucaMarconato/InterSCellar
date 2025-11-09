@@ -136,3 +136,202 @@ def precompute_global_surface_and_halo_bboxes(
     print(f"Using only halo-extended bboxes for all operations")
     
     return global_surface, all_bboxes_with_halo, all_bboxes
+
+## Surface-based neighbor identification
+
+def cell_neighbor_candidate_centroid_distance_kdtree(conn: sqlite3.Connection, 
+                                                   cell_id: int,
+                                                   radius_um: float = 75.0,
+                                                   voxel_size_um: tuple = (0.56, 0.28, 0.28)) -> Set[int]:
+    from scipy.spatial import cKDTree
+    
+    if isinstance(cell_id, np.ndarray):
+        cell_id = int(cell_id.ravel()[0])
+    else:
+        cell_id = int(cell_id)
+
+    metadata_df = get_cells_dataframe(conn)
+
+    if cell_id not in metadata_df['cell_id'].values:
+        raise ValueError(f"Cell ID {cell_id} not found in database")
+
+    coords = metadata_df[['centroid_z', 'centroid_y', 'centroid_x']].values
+    scaled_coords = coords * np.array(voxel_size_um)
+    kdtree = cKDTree(scaled_coords)
+
+    target_idx = metadata_df.index[metadata_df['cell_id'] == cell_id][0]
+    target_point = scaled_coords[target_idx]
+    indices = kdtree.query_ball_point(target_point, r=radius_um)
+    candidate_neighbor_ids = set(metadata_df.iloc[i]['cell_id'] for i in indices if metadata_df.iloc[i]['cell_id'] != cell_id)
+
+    return candidate_neighbor_ids
+
+def find_touching_neighbors_direct_adjacency(mask_3d: np.ndarray, all_bboxes: dict, n_jobs: int = 1) -> set:
+    import numpy as np
+    from tqdm import tqdm
+
+    print("Finding touching neighbors...")
+
+    labels = mask_3d
+    z_dim, y_dim, x_dim = labels.shape
+
+    touching_pairs: set = set()
+
+    # Helper function: add pairs from two same-shaped arrays
+    def add_pairs(a: np.ndarray, b: np.ndarray) -> None:
+        diff_mask = (a != b)
+        if not diff_mask.any():
+            return
+        a_nz = a[diff_mask]
+        b_nz = b[diff_mask]
+
+        nz_mask = (a_nz != 0) & (b_nz != 0)
+        if not nz_mask.any():
+            return
+        a_nz = a_nz[nz_mask]
+        b_nz = b_nz[nz_mask]
+
+        minv = np.minimum(a_nz, b_nz)
+        maxv = np.maximum(a_nz, b_nz)
+        touching_pairs.update(zip(minv.astype(np.int64).tolist(), maxv.astype(np.int64).tolist()))
+
+    # Z-axis face adjacency: compare slice z with z+1
+    for z in tqdm(range(z_dim - 1), desc="6-conn touching: Z faces", ncols=100):
+        a = labels[z + 1, :, :]
+        b = labels[z, :, :]
+        add_pairs(a, b)
+
+    # Y-axis face adjacency: within each z-slice, compare row y with y+1
+    for z in tqdm(range(z_dim), desc="6-conn touching: Y faces", ncols=100):
+        s = labels[z]
+        a = s[1:, :]
+        b = s[:-1, :]
+        add_pairs(a, b)
+
+    # X-axis face adjacency: within each z-slice, compare col x with x+1
+    for z in tqdm(range(z_dim), desc="6-conn touching: X faces", ncols=100):
+        s = labels[z]
+        a = s[:, 1:]
+        b = s[:, :-1]
+        add_pairs(a, b)
+
+    print(f"Identified {len(touching_pairs)} touching neighbor pairs.")
+    return touching_pairs
+
+def find_all_neighbors_by_surface_distance_optimized(
+    mask_3d: np.ndarray,
+    metadata_df: pd.DataFrame,
+    max_distance_um: float = 0.5,
+    voxel_size_um: tuple = (0.56, 0.28, 0.28),
+    centroid_prefilter_radius_um: float = 75.0,
+    n_jobs: int = 1
+) -> pd.DataFrame:
+    required_cols = ['CellID', 'phenotype', 'Z_centroid', 'Y_centroid', 'X_centroid']
+    missing_cols = [col for col in required_cols if col not in metadata_df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns in metadata: {missing_cols}")
+    
+    cell_type_map = dict(zip(metadata_df['CellID'], metadata_df['phenotype']))
+    
+    print(f"Step 1: Finding touching cells...")
+    touching_pairs = find_touching_neighbors_direct_adjacency(mask_3d, n_jobs)
+    
+    neighbor_data = []
+    for cell_a_id, cell_b_id in touching_pairs:
+        cell_a_type = cell_type_map.get(cell_a_id, 'Unknown')
+        cell_b_type = cell_type_map.get(cell_b_id, 'Unknown')
+        
+        neighbor_data.append({
+            'cell_a_id': cell_a_id,
+            'cell_b_id': cell_b_id,
+            'cell_a_type': cell_a_type,
+            'cell_b_type': cell_b_type,
+            'surface_distance_um': 0.0  # Touching cells have distance = 0
+        })
+    
+    touching_count = len(neighbor_data)
+    print(f"Found {touching_count} touching neighbor pairs")
+    
+    # If max_distance_um = 0.0, return only touching cells
+    if max_distance_um == 0.0:
+        print(f"Returning only touching cells (max_distance_um = 0.0)")
+        neighbor_df = pd.DataFrame(neighbor_data)
+        return neighbor_df
+    
+    print(f"Step 2: Finding non-touching neighbors within {max_distance_um} μm...")
+    print(f"Using centroid pre-filter radius: {centroid_prefilter_radius_um} μm")
+    
+    from joblib import Parallel, delayed
+    
+    centroids = metadata_df[['Z_centroid', 'Y_centroid', 'X_centroid']].values
+    scaled_centroids = centroids * np.array(voxel_size_um)
+    kdtree = cKDTree(scaled_centroids)
+    cell_ids = metadata_df['CellID'].values
+    
+    touching_pairs_set = touching_pairs
+    
+    def process_cell_pair_optimized(cell_a_idx):
+        cell_a_id = cell_ids[cell_a_idx]
+        cell_a_centroid = scaled_centroids[cell_a_idx]
+        
+        candidate_indices = kdtree.query_ball_point(
+            cell_a_centroid, 
+            r=centroid_prefilter_radius_um
+        )
+        
+        neighbors = []
+        for cell_b_idx in candidate_indices:
+            if cell_b_idx <= cell_a_idx:  # Avoid duplicate pairs
+                continue
+                
+            cell_b_id = cell_ids[cell_b_idx]
+            
+            if (cell_a_id, cell_b_id) in touching_pairs_set or (cell_b_id, cell_a_id) in touching_pairs_set:
+                continue # Skip pair if already touching
+            
+            try:
+                distance = compute_surface_to_surface_distance_optimized(
+                    mask_3d, cell_a_id, cell_b_id, voxel_size_um, max_distance_um
+                )
+                
+                if distance <= max_distance_um:
+                    neighbors.append({
+                        'cell_a_id': cell_a_id,
+                        'cell_b_id': cell_b_id,
+                        'cell_a_type': metadata_df.iloc[cell_a_idx]['phenotype'],
+                        'cell_b_type': metadata_df.iloc[cell_b_idx]['phenotype'],
+                        'surface_distance_um': distance
+                    })
+            except Exception as e:
+                print(f"Error computing optimized distance for pair ({cell_a_id}, {cell_b_id}): {e}")
+                continue
+        
+        return neighbors
+    
+    # Optimization: parallel processing
+    print(f"Processing {len(cell_ids)} cells for non-touching neighbors...")
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(process_cell_pair_optimized)(i) for i in tqdm(range(len(cell_ids)), desc="Finding non-touching neighbors with optimized EDT")
+    )
+    
+    for cell_neighbors in results:
+        neighbor_data.extend(cell_neighbors)
+    
+    neighbor_df = pd.DataFrame(neighbor_data)
+    
+    total_count = len(neighbor_df)
+    non_touching_count = total_count - touching_count
+    
+    print(f"Neighbor detection complete:")
+    print(f"  - Touching neighbors: {touching_count}")
+    print(f"  - Non-touching neighbors within {max_distance_um} μm: {non_touching_count}")
+    print(f"  - Total neighbors: {total_count}")
+    
+    if non_touching_count > 0:
+        non_touching_df = neighbor_df[neighbor_df['surface_distance_um'] > 0.0]
+        print(f"Distance statistics for non-touching neighbors:")
+        print(f"  Min distance: {non_touching_df['surface_distance_um'].min():.3f} μm")
+        print(f"  Max distance: {non_touching_df['surface_distance_um'].max():.3f} μm")
+        print(f"  Mean distance: {non_touching_df['surface_distance_um'].mean():.3f} μm")
+    
+    return neighbor_df
