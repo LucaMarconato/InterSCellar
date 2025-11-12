@@ -1,37 +1,86 @@
-# Python cache
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
+*.ipynb_checkpoints
 
 # Mac system files
 .DS_Store
+.AppleDouble
+.LSOverride
 
 # Log files
 *.log
+*.log.*
 
-# Conda
+# Virtual environments
+venv/
 env/
-*.env
+ENV/
+.venv
+.conda/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
 
 # Temporary files
 *.tmp
-*.swp
+*.temp
+*.bak
+*.backup
 
-# Raw data files
-*.zarr
-*.tiff
-*.ome.tiff
-*.tif
-*.npy
-*.json
-
-# Database files
-*.csv
+# Project output files
 *.db
-*.sqlite
-*.h5ad
+*.duckdb
 *.pkl
+*.pickle
+*.h5ad
+*.zarr
+*.csv
+*.sqlite
+intermediate_interscellar_results/
+results/
+output/
+
+# uv
+.uv/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json

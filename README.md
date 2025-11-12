@@ -8,14 +8,30 @@
 
 ## Installation
 
-Install package:
+**Install uv (if not already installed):**
 ```sh
+# On macOS and Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or via pip
+pip install uv
+
+# Or via homebrew (macOS)
+brew install uv
+```
+
+**Install package and dependencies:**
+```sh
+# Using uv (recommended)
+uv sync
+
+# Or using pip
 pip install interscellar
 ```
 
 ## Usage
 
-### Import:
+**Import:**
 ```sh
 import interscellar
 ```

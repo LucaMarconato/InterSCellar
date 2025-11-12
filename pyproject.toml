@@ -7,21 +7,25 @@ name = "InterSCellar"
 version = "0.1.0"
 description = "Surface-based Cell Neighbor Detection and Interscellar Volume Computation for 2D & 3D Spatial Omics"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
     {name = "Eunice Yewon Lee", email = "yl888@duke.edu"}
 ]
 keywords = [
-    "spatial-transcriptomics",
+    "spatial-omics",
     "cell-neighbors",
     "cell-interactions",
-    "interscellar-volumes",
+    "cell-cell-communication",
+    "intercellular",
+    "single-cell",
+    "transcriptomics",
+    "proteomics",
+    "metabolomics",
     "bioinformatics",
     "computational-biology",
     "visualization",
-    "napari",
-    "3d-visualization"
+    "3d"
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -29,7 +33,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -49,6 +52,8 @@ dependencies = [
     "seaborn>=0.11.0",
     "napari>=0.4.0",
     "zarr>=2.10.0",
+    "anndata>=0.8.0",
+    "duckdb>=0.6.0",
 ]
 
 [project.optional-dependencies]
