@@ -37,7 +37,7 @@ def find_all_neighbors_2d(
     cell_type: str = 'subclass',
     centroid_x: str = 'X',
     centroid_y: str = 'Y',
-    db_path: str = 'cell_neighbor_graph_2d.db',
+    db_path: Optional[str] = None,
     output_csv: Optional[str] = None,
     output_anndata: Optional[str] = None,
     n_jobs: int = 1,
@@ -68,6 +68,21 @@ def find_all_neighbors_2d(
     
     step1_time = time.time() - step1_start
     print(f"Step 1 completed in {step1_time:.2f} seconds")
+    
+    metadata_dir = os.path.dirname(metadata_csv_path) if os.path.dirname(metadata_csv_path) else "."
+    base_name = os.path.splitext(os.path.basename(metadata_csv_path))[0]
+    
+    if db_path is None:
+        db_path = os.path.join(metadata_dir, f"{base_name}_neighbor_graph_2d.db")
+        print(f"db_path: {db_path}")
+    
+    if output_csv is None:
+        output_csv = os.path.join(metadata_dir, f"{base_name}_neighbors_2d.csv")
+        print(f"output_csv: {output_csv}")
+    
+    if output_anndata is None:
+        output_anndata = os.path.join(metadata_dir, f"{base_name}_neighbors_2d.h5ad")
+        print(f"output_anndata: {output_anndata}")
     
     print(f"\n2. Validating input file: {polygon_json_path}...")
     step2_start = time.time()

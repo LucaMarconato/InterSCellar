@@ -42,7 +42,7 @@ def find_cell_neighbors_3d(
     centroid_x: str = 'X_centroid',
     centroid_y: str = 'Y_centroid',
     centroid_z: str = 'Z_centroid',
-    db_path: str = 'cell_neighbor_graph.db',
+    db_path: Optional[str] = None,
     output_csv: Optional[str] = None,
     output_anndata: Optional[str] = None,
     n_jobs: int = 1,
@@ -73,6 +73,22 @@ def find_cell_neighbors_3d(
     
     step1_time = time.time() - step1_start
     print(f"Step 1 completed in {step1_time:.2f} seconds")
+    
+    # Auto-generate output paths based on input file names
+    metadata_dir = os.path.dirname(metadata_csv_path) if os.path.dirname(metadata_csv_path) else "."
+    base_name = os.path.splitext(os.path.basename(metadata_csv_path))[0]
+    
+    if db_path is None:
+        db_path = os.path.join(metadata_dir, f"{base_name}_neighbor_graph.db")
+        print(f"db_path: {db_path}")
+    
+    if output_csv is None:
+        output_csv = os.path.join(metadata_dir, f"{base_name}_neighbors_3d.csv")
+        print(f"output_csv: {output_csv}")
+    
+    if output_anndata is None:
+        output_anndata = os.path.join(metadata_dir, f"{base_name}_neighbors_3d.h5ad")
+        print(f"output_anndata: {output_anndata}")
     
     if save_surfaces_pickle is None:
         base_name = os.path.splitext(db_path)[0]
@@ -177,7 +193,7 @@ def compute_interscellar_volumes_3d(
     halo_bboxes_pickle: Optional[str] = None,
     neighbor_db_path: Optional[str] = None,
     voxel_size_um: tuple = (0.56, 0.28, 0.28),
-    db_path: str = 'interscellar_volumes.db',
+    db_path: Optional[str] = None,
     output_csv: Optional[str] = None,
     output_anndata: Optional[str] = None,
     output_mesh_zarr: Optional[str] = None,
@@ -194,6 +210,22 @@ def compute_interscellar_volumes_3d(
     print("=" * 60)
     
     overall_start_time = time.time()
+    
+    csv_dir = os.path.dirname(neighbor_pairs_csv) if os.path.dirname(neighbor_pairs_csv) else "."
+    csv_base_name = os.path.splitext(os.path.basename(neighbor_pairs_csv))[0]
+    csv_base_name = csv_base_name.replace("_neighbors_3d", "").replace("_neighbors", "").replace("neighbors", "")
+    
+    if db_path is None:
+        db_path = os.path.join(csv_dir, f"{csv_base_name}_interscellar_volumes.db")
+        print(f"db_path: {db_path}")
+    
+    if output_csv is None:
+        output_csv = os.path.join(csv_dir, f"{csv_base_name}_volumes.csv")
+        print(f"output_csv: {output_csv}")
+    
+    if output_anndata is None:
+        output_anndata = os.path.join(csv_dir, f"{csv_base_name}_volumes.h5ad")
+        print(f"output_anndata: {output_anndata}")
     
     if global_surface_pickle is None or halo_bboxes_pickle is None:
         if neighbor_db_path:
@@ -216,10 +248,12 @@ def compute_interscellar_volumes_3d(
     if output_mesh_zarr is None:
         base_name = os.path.splitext(db_path)[0]
         output_mesh_zarr = f"{base_name}_interscellar_volumes.zarr"
+        print(f"output_mesh_zarr: {output_mesh_zarr}")
     
     if output_cell_only_zarr is None:
         base_name = os.path.splitext(db_path)[0]
         output_cell_only_zarr = f"{base_name}_cell_only_volumes.zarr"
+        print(f"output_cell_only_zarr: {output_cell_only_zarr}")
     
     print(f"\n1. Validating input files...")
     step1_start = time.time()
