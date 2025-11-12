@@ -11,7 +11,10 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
-import interscellar
+try:
+    import interscellar
+except ImportError:
+    pass
 
 project = 'InterSCellar'
 copyright = '2025, HIDIVE Lab'
