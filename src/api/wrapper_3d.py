@@ -323,7 +323,6 @@ def compute_interscellar_volumes_3d(
         )
         
         print(f"\n3. Verifying mesh zarr completion...")
-        import os
         import zarr
         mesh_zarr_exists = False
         if output_mesh_zarr and os.path.exists(output_mesh_zarr) and os.path.isdir(output_mesh_zarr):
