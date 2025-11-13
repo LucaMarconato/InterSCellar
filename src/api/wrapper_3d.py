@@ -215,6 +215,17 @@ def compute_interscellar_volumes_3d(
     csv_base_name = os.path.splitext(os.path.basename(neighbor_pairs_csv))[0]
     csv_base_name = csv_base_name.replace("_neighbors_3d", "").replace("_neighbors", "").replace("neighbors", "")
     
+    if neighbor_db_path is None:
+        possible_db = os.path.join(csv_dir, f"{csv_base_name}_neighbor_graph.db")
+        if os.path.exists(possible_db):
+            neighbor_db_path = possible_db
+            print(f"Detected neighbor_db_path: {neighbor_db_path}")
+        else:
+            alt_db = os.path.join(csv_dir, os.path.basename(neighbor_pairs_csv).replace("_neighbors_3d.csv", "_neighbor_graph.db").replace("_neighbors.csv", "_neighbor_graph.db").replace(".csv", "_neighbor_graph.db"))
+            if os.path.exists(alt_db):
+                neighbor_db_path = alt_db
+                print(f"Detected neighbor_db_path: {neighbor_db_path}")
+    
     if db_path is None:
         db_path = os.path.join(csv_dir, f"{csv_base_name}_interscellar_volumes.db")
         print(f"db_path: {db_path}")
@@ -230,38 +241,53 @@ def compute_interscellar_volumes_3d(
     if global_surface_pickle is None or halo_bboxes_pickle is None:
         if neighbor_db_path:
             base_name = os.path.splitext(neighbor_db_path)[0]
-            if global_surface_pickle is None:
-                possible_surfaces = [
-                    f"{base_name}_surfaces.pkl",
-                    f"{base_name}_graph_surfaces.pkl",
-                ]
-                for path in possible_surfaces:
-                    if os.path.exists(path):
-                        global_surface_pickle = path
-                        break
-                else:
-                    global_surface_pickle = f"{base_name}_surfaces.pkl"
-            if halo_bboxes_pickle is None:
-                base_for_halo = base_name.replace('_surfaces', '').replace('surfaces', '')
-                possible_halo = [
-                    f"{base_for_halo}_halo_bboxes.pkl",
-                    f"{base_name.replace('_surfaces', '_halo_bboxes')}.pkl",
-                ]
-                for path in possible_halo:
-                    if os.path.exists(path):
-                        halo_bboxes_pickle = path
-                        break
-                else:
-                    halo_bboxes_pickle = f"{base_name.replace('_surfaces', '_halo_bboxes')}.pkl"
+            search_dir = os.path.dirname(neighbor_db_path) if os.path.dirname(neighbor_db_path) else "."
         else:
             csv_dir = os.path.dirname(neighbor_pairs_csv) if os.path.dirname(neighbor_pairs_csv) else "."
             csv_basename = os.path.basename(neighbor_pairs_csv)
-            base_name = csv_basename.replace("_neighbors.csv", "").replace("neighbors.csv", "").replace(".csv", "")
-            base_name = os.path.join(csv_dir, base_name)
+            base_name_stem = csv_basename.replace("_neighbors_3d.csv", "").replace("_neighbors.csv", "").replace("neighbors.csv", "").replace(".csv", "")
+            possible_db = os.path.join(csv_dir, f"{base_name_stem}_neighbor_graph.db")
+            if os.path.exists(possible_db):
+                base_name = os.path.splitext(possible_db)[0]
+                search_dir = csv_dir
+            else:
+                base_name = os.path.join(csv_dir, base_name_stem)
+                search_dir = csv_dir
+        
+        if global_surface_pickle is None:
+            possible_surfaces = [
+                f"{base_name}_surfaces.pkl",
+                f"{base_name}_graph_surfaces.pkl",
+            ]
+            if os.path.exists(search_dir):
+                for f in os.listdir(search_dir):
+                    if f.endswith('.pkl') and 'surface' in f.lower() and os.path.basename(base_name) in f:
+                        possible_surfaces.append(os.path.join(search_dir, f))
             
-            if global_surface_pickle is None:
+            for path in possible_surfaces:
+                if os.path.exists(path):
+                    global_surface_pickle = path
+                    print(f"Detected global_surface_pickle: {global_surface_pickle}")
+                    break
+            else:
                 global_surface_pickle = f"{base_name}_surfaces.pkl"
-            if halo_bboxes_pickle is None:
+        
+        if halo_bboxes_pickle is None:
+            possible_halo = [
+                f"{base_name}_halo_bboxes.pkl",
+                f"{base_name.replace('_surfaces', '_halo_bboxes')}.pkl",
+            ]
+            if os.path.exists(search_dir):
+                for f in os.listdir(search_dir):
+                    if f.endswith('.pkl') and 'halo' in f.lower() and os.path.basename(base_name) in f:
+                        possible_halo.append(os.path.join(search_dir, f))
+            
+            for path in possible_halo:
+                if os.path.exists(path):
+                    halo_bboxes_pickle = path
+                    print(f"Detected halo_bboxes_pickle: {halo_bboxes_pickle}")
+                    break
+            else:
                 halo_bboxes_pickle = f"{base_name}_halo_bboxes.pkl"
     
     if output_mesh_zarr is None:
@@ -278,14 +304,20 @@ def compute_interscellar_volumes_3d(
     step1_start = time.time()
     
     required_files = [ome_zarr_path, neighbor_pairs_csv]
-    if global_surface_pickle:
-        required_files.append(global_surface_pickle)
-    if halo_bboxes_pickle:
-        required_files.append(halo_bboxes_pickle)
-    
     for file_path in required_files:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Required file not found: {file_path}")
+    
+    if global_surface_pickle and not os.path.exists(global_surface_pickle):
+        print(f"Warning: global_surface_pickle not found: {global_surface_pickle}")
+        print(f"Loading from graph_state.pkl as fallback")
+    elif global_surface_pickle:
+        print(f"Using global_surface_pickle: {global_surface_pickle}")
+    
+    if halo_bboxes_pickle and not os.path.exists(halo_bboxes_pickle):
+        print(f"Warning: halo_bboxes_pickle not found: {halo_bboxes_pickle}")
+    elif halo_bboxes_pickle:
+        print(f"Using halo_bboxes_pickle: {halo_bboxes_pickle}")
     
     print(f"All input files found")
     step1_time = time.time() - step1_start
