@@ -1094,7 +1094,13 @@ def build_cell_graph_database_3d(
         }
         save_surfaces_to_pickle(surface_data, save_surfaces_pickle)
         
-        halo_bboxes_pickle = save_surfaces_pickle.replace('global_surface', 'halo_bboxes')
+        # Generate halo bboxes filename - replace 'surfaces' with 'halo_bboxes' or append if not found
+        if 'surfaces' in save_surfaces_pickle:
+            halo_bboxes_pickle = save_surfaces_pickle.replace('surfaces', 'halo_bboxes')
+        elif save_surfaces_pickle.endswith('.pkl'):
+            halo_bboxes_pickle = save_surfaces_pickle.replace('.pkl', '_halo_bboxes.pkl')
+        else:
+            halo_bboxes_pickle = save_surfaces_pickle + '_halo_bboxes.pkl'
         print(f"Saving halo bounding boxes to: {halo_bboxes_pickle}")
         halo_bboxes_data = {
             'all_bboxes_with_halo': all_bboxes_with_halo,

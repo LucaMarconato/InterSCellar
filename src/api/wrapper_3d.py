@@ -231,9 +231,28 @@ def compute_interscellar_volumes_3d(
         if neighbor_db_path:
             base_name = os.path.splitext(neighbor_db_path)[0]
             if global_surface_pickle is None:
-                global_surface_pickle = f"{base_name}_surfaces.pkl"
+                possible_surfaces = [
+                    f"{base_name}_surfaces.pkl",
+                    f"{base_name}_graph_surfaces.pkl",
+                ]
+                for path in possible_surfaces:
+                    if os.path.exists(path):
+                        global_surface_pickle = path
+                        break
+                else:
+                    global_surface_pickle = f"{base_name}_surfaces.pkl"
             if halo_bboxes_pickle is None:
-                halo_bboxes_pickle = f"{base_name}_graph_state.pkl"
+                base_for_halo = base_name.replace('_surfaces', '').replace('surfaces', '')
+                possible_halo = [
+                    f"{base_for_halo}_halo_bboxes.pkl",
+                    f"{base_name.replace('_surfaces', '_halo_bboxes')}.pkl",
+                ]
+                for path in possible_halo:
+                    if os.path.exists(path):
+                        halo_bboxes_pickle = path
+                        break
+                else:
+                    halo_bboxes_pickle = f"{base_name.replace('_surfaces', '_halo_bboxes')}.pkl"
         else:
             csv_dir = os.path.dirname(neighbor_pairs_csv) if os.path.dirname(neighbor_pairs_csv) else "."
             csv_basename = os.path.basename(neighbor_pairs_csv)
@@ -243,7 +262,7 @@ def compute_interscellar_volumes_3d(
             if global_surface_pickle is None:
                 global_surface_pickle = f"{base_name}_surfaces.pkl"
             if halo_bboxes_pickle is None:
-                halo_bboxes_pickle = f"{base_name}_graph_state.pkl"
+                halo_bboxes_pickle = f"{base_name}_halo_bboxes.pkl"
     
     if output_mesh_zarr is None:
         base_name = os.path.splitext(db_path)[0]

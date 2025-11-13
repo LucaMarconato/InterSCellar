@@ -72,19 +72,87 @@ def load_global_surface_from_pickle(pickle_path: str) -> np.ndarray:
     print(f"Loading global surface from: {pickle_path}")
     
     if not os.path.exists(pickle_path):
+        graph_state_path = pickle_path.replace('surfaces.pkl', 'graph_state.pkl').replace('_surfaces.pkl', '_graph_state.pkl')
+        if os.path.exists(graph_state_path):
+            print(f"Global surface file not found. Trying to load from: {graph_state_path}")
+            try:
+                from ..core.find_cell_neighbors_3d import load_graph_state_from_pickle
+                graph_state = load_graph_state_from_pickle(graph_state_path)
+                if 'surfaces' in graph_state and 'global_surface' in graph_state['surfaces']:
+                    global_surface = graph_state['surfaces']['global_surface']
+                    print(f"Successfully loaded global surface")
+                    print(f"Loaded global surface with shape {global_surface.shape} and {global_surface.sum()} surface voxels")
+                    return global_surface
+            except Exception as e:
+                print(f"Could not load from graph_state file: {e}")
+        
         raise FileNotFoundError(f"Global surface pickle file not found: {pickle_path}")
     
     with open(pickle_path, "rb") as f:
         surface_data = pickle.load(f)
     
-    if 'global_surface' in surface_data:
-        global_surface = surface_data['global_surface']
+    if isinstance(surface_data, dict):
+        if 'global_surface' in surface_data:
+            global_surface = surface_data['global_surface']
+        elif 'all_bboxes_with_halo' in surface_data:
+            # This file contains halo bboxes, not global surface - try graph_state as fallback
+            # Try multiple possible graph_state filenames
+            possible_graph_state_paths = [
+                pickle_path.replace('surfaces.pkl', 'graph_state.pkl'),
+                pickle_path.replace('_surfaces.pkl', '_graph_state.pkl'),
+                pickle_path.replace('_graph_surfaces.pkl', '_graph_state.pkl'),
+                os.path.join(os.path.dirname(pickle_path), os.path.basename(pickle_path).replace('surfaces.pkl', 'graph_state.pkl').replace('_surfaces.pkl', '_graph_state.pkl')),
+            ]
+            graph_state_path = None
+            for path in possible_graph_state_paths:
+                if os.path.exists(path):
+                    graph_state_path = path
+                    break
+            
+            if graph_state_path and os.path.exists(graph_state_path):
+                print(f"Pickle file contains halo bounding boxes. Trying to load from graph_state file: {graph_state_path}")
+                try:
+                    from ..core.find_cell_neighbors_3d import load_graph_state_from_pickle
+                    graph_state = load_graph_state_from_pickle(graph_state_path)
+                    if 'surfaces' in graph_state and 'global_surface' in graph_state['surfaces']:
+                        global_surface = graph_state['surfaces']['global_surface']
+                        print(f"Successfully loaded global surface from graph_state file")
+                        print(f"Loaded global surface with shape {global_surface.shape} and {global_surface.sum()} surface voxels")
+                        return global_surface
+                except Exception as e:
+                    print(f"Could not load from graph_state file: {e}")
+            
+            raise ValueError(
+                f"Pickle file contains halo bounding boxes, not global surface. "
+                f"Expected file with 'global_surface' key, but found 'all_bboxes_with_halo'. "
+                f"Please check the file path. The global surface should be saved separately, "
+                f"or re-run find_cell_neighbors_3d to regenerate the correct files."
+            )
+        else:
+            # Try to find any numpy array in the dict
+            for key, value in surface_data.items():
+                if isinstance(value, np.ndarray):
+                    print(f"Warning: Using '{key}' as global surface (expected 'global_surface')")
+                    global_surface = value
+                    break
+            else:
+                raise ValueError(
+                    f"Invalid format in global surface pickle file. "
+                    f"Expected dict with 'global_surface' key or numpy array. "
+                    f"Found dict with keys: {list(surface_data.keys())}"
+                )
     elif isinstance(surface_data, np.ndarray):
         global_surface = surface_data
     else:
-        raise ValueError("Invalid format in global surface pickle file")
+        raise ValueError(
+            f"Invalid format in global surface pickle file. "
+            f"Expected dict or numpy array, got {type(surface_data)}"
+        )
     
-    print(f"Loaded global surface with {global_surface.sum()} surface voxels")
+    if not isinstance(global_surface, np.ndarray):
+        raise ValueError(f"Global surface is not a numpy array, got {type(global_surface)}")
+    
+    print(f"Loaded global surface with shape {global_surface.shape} and {global_surface.sum()} surface voxels")
     return global_surface
 
 ### Interscellar volume computation
