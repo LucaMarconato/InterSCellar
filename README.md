@@ -49,10 +49,9 @@ volumes_3d, adata, conn = interscellar.compute_interscellar_volumes_3d(
 ```
 
 ```sh
-output_path = interscellar.compute_cell_only_volumes_3d(
+cellonly_3d = interscellar.compute_cell_only_volumes_3d(
     ome_zarr_path="data/segmentation.zarr",
-    interscellar_volumes_zarr="results/interscellar_volumes.zarr",
-    output_zarr_path="results/cell_only_volumes.zarr"
+    interscellar_volumes_zarr="results/interscellar_volumes.zarr"
 )
 ```
 

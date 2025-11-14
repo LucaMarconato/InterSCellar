@@ -69,10 +69,9 @@ After computing interscellar volumes, you can compute cell-only volumes by subtr
 
 .. code-block:: python
 
-   output_path = interscellar.compute_cell_only_volumes_3d(
+   cellonly_3d = interscellar.compute_cell_only_volumes_3d(
        ome_zarr_path="data/segmentation.zarr",
-       interscellar_volumes_zarr="results/interscellar_volumes.zarr",
-       output_zarr_path="results/cell_only_volumes.zarr"
+       interscellar_volumes_zarr="results/interscellar_volumes.zarr"
    )
 
 Parameters
@@ -80,10 +79,11 @@ Parameters
 
 * ``ome_zarr_path``: Path to original OME-Zarr file containing 3D segmentation
 * ``interscellar_volumes_zarr``: Path to interscellar volumes zarr file from step 2
-* ``output_zarr_path``: Path for output cell-only volumes zarr (optional, auto-generated if not provided)
+
+The output zarr file is automatically saved in the same directory as the interscellar_volumes_zarr.
 
 Output
 ------
 
 The function returns:
-* ``output_path``: Path to the created cell-only volumes zarr file
+* ``cellonly_3d``: DataFrame with cell-only volume measurements

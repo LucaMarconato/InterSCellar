@@ -520,32 +520,56 @@ def compute_interscellar_volumes_3d(
 def compute_cell_only_volumes_3d(
     ome_zarr_path: str,
     interscellar_volumes_zarr: str,
-    output_zarr_path: Optional[str] = None
-) -> str:
+    output_zarr_path: Optional[str] = None,
+    neighbor_db_path: Optional[str] = None
+) -> pd.DataFrame:
     print("=" * 60)
     print("InterSCellar: Cell-Only Volumes Computation - 3D")
     print("=" * 60)
     
     import os
+    import zarr
+    import numpy as np
     from ..core.compute_interscellar_volumes_3d import create_global_cell_only_volumes_zarr
     
     if output_zarr_path is None:
-        base_name = os.path.splitext(interscellar_volumes_zarr)[0]
+        interscellar_dir = os.path.dirname(interscellar_volumes_zarr) if os.path.dirname(interscellar_volumes_zarr) else "."
+        interscellar_basename = os.path.basename(interscellar_volumes_zarr)
+        base_name = os.path.splitext(interscellar_basename)[0]
+        
         if base_name.endswith('_interscellar_volumes'):
-            output_zarr_path = base_name.replace('_interscellar_volumes', '_cell_only_volumes') + '.zarr'
+            output_basename = base_name.replace('_interscellar_volumes', '_cell_only_volumes') + '.zarr'
+        elif base_name.endswith('_interscellar_volumes_interscellar_volumes'):
+            output_basename = base_name.replace('_interscellar_volumes_interscellar_volumes', '_cell_only_volumes') + '.zarr'
         else:
-            output_zarr_path = base_name + '_cell_only_volumes.zarr'
-        print(f"Output path: {output_zarr_path}")
+            output_basename = base_name + '_cell_only_volumes.zarr'
+        
+        output_zarr_path = os.path.join(interscellar_dir, output_basename)
     
     if not os.path.exists(ome_zarr_path):
         raise FileNotFoundError(f"Cell segmentation zarr not found: {ome_zarr_path}")
     if not os.path.exists(interscellar_volumes_zarr):
         raise FileNotFoundError(f"Interscellar volumes zarr not found: {interscellar_volumes_zarr}")
     
+    # Auto-detect voxel_size_um from interscellar volumes zarr
+    try:
+        interscellar_zarr = zarr.open(interscellar_volumes_zarr, mode='r')
+        if 'voxel_size_um' in interscellar_zarr.attrs:
+            voxel_size_um = tuple(interscellar_zarr.attrs['voxel_size_um'])
+            print(f"Detected voxel_size_um from interscellar zarr: {voxel_size_um}")
+        else:
+            # Fallback to default
+            voxel_size_um = (0.56, 0.28, 0.28)
+            print(f"Warning: voxel_size_um not found in zarr attributes, using default: {voxel_size_um}")
+        del interscellar_zarr
+    except Exception as e:
+        voxel_size_um = (0.56, 0.28, 0.28)
+        print(f"Warning: Could not read voxel_size_um from zarr, using default: {voxel_size_um} ({e})")
+    
     print(f"\nInput files:")
     print(f"Cell segmentation: {ome_zarr_path}")
     print(f"Interscellar volumes: {interscellar_volumes_zarr}")
-    print(f"Output: {output_zarr_path}")
+    print(f"Output zarr: {output_zarr_path}")
     
     try:
         create_global_cell_only_volumes_zarr(
@@ -553,14 +577,79 @@ def compute_cell_only_volumes_3d(
             interscellar_volumes_zarr=interscellar_volumes_zarr,
             output_zarr_path=output_zarr_path
         )
-        
-        if os.path.exists(output_zarr_path):
-            print(f"\nCell-only volumes zarr created successfully: {output_zarr_path}")
-            print("=" * 60)
-            return output_zarr_path
-        else:
-            raise RuntimeError(f"Cell-only zarr creation reported success but file not found: {output_zarr_path}")
+        print(f"Cell-only volumes zarr created: {output_zarr_path}")
     except Exception as e:
         print(f"\nError creating cell-only volumes zarr: {e}")
         print("=" * 60)
         raise
+    
+    print(f"\nComputing cell-only volume measurements...")
+    cell_only_zarr = zarr.open(output_zarr_path, mode='r')
+    
+    data_key = None
+    if 'labels' in cell_only_zarr:
+        data_key = 'labels'
+    elif '0' in cell_only_zarr:
+        data_key = '0'
+    else:
+        for key in cell_only_zarr.keys():
+            if hasattr(cell_only_zarr[key], 'ndim') and cell_only_zarr[key].ndim >= 3:
+                data_key = key
+                break
+    
+    if data_key is None:
+        raise ValueError(f"Could not find 3D data in cell-only zarr: {output_zarr_path}")
+    
+    cell_only_data = cell_only_zarr[data_key]
+    if cell_only_data.ndim == 5:
+        cell_only_mask = np.asarray(cell_only_data[0, 0])
+    elif cell_only_data.ndim == 3:
+        cell_only_mask = np.asarray(cell_only_data)
+    else:
+        raise ValueError(f"Unexpected dimensions in cell-only zarr: {cell_only_data.ndim}")
+    
+    voxel_volume_um3 = np.prod(voxel_size_um)
+    
+    unique_cells = np.unique(cell_only_mask)
+    unique_cells = unique_cells[unique_cells > 0]
+    
+    print(f"Found {len(unique_cells)} cells in cell-only volumes")
+    
+    cell_types = {}
+    if neighbor_db_path and os.path.exists(neighbor_db_path):
+        try:
+            import sqlite3
+            conn = sqlite3.connect(neighbor_db_path)
+            try:
+                cells_df = pd.read_sql_query("SELECT cell_id, cell_type FROM cells", conn)
+                cell_types = dict(zip(cells_df['cell_id'], cells_df['cell_type']))
+                print(f"Loaded cell types for {len(cell_types)} cells from neighbor database")
+            except Exception as e:
+                print(f"Warning: Could not load cell types from database: {e}")
+            finally:
+                conn.close()
+        except Exception as e:
+            print(f"Warning: Could not access neighbor database: {e}")
+    
+    volume_data = []
+    for cell_id in unique_cells:
+        cell_mask = (cell_only_mask == cell_id)
+        volume_voxels = cell_mask.sum()
+        volume_um3 = volume_voxels * voxel_volume_um3
+        
+        volume_data.append({
+            'cell_id': int(cell_id),
+            'cell_only_volume_um3': float(volume_um3),
+            'cell_only_volume_voxels': int(volume_voxels),
+            'cell_type': cell_types.get(int(cell_id), 'unknown')
+        })
+    
+    cell_only_df = pd.DataFrame(volume_data)
+    cell_only_df = cell_only_df.sort_values('cell_id')
+    
+    print(f"Computed cell-only volumes for {len(cell_only_df)} cells")
+    print(f"Total cell-only volume: {cell_only_df['cell_only_volume_um3'].sum():.2f} μm³")
+    print(f"Mean cell-only volume: {cell_only_df['cell_only_volume_um3'].mean():.2f} μm³")
+    print("=" * 60)
+    
+    return cell_only_df
