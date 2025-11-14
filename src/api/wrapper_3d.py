@@ -516,3 +516,51 @@ def compute_interscellar_volumes_3d(
     else:
         conn.close()
         return volume_results_df, adata, None
+
+def compute_cell_only_volumes_3d(
+    ome_zarr_path: str,
+    interscellar_volumes_zarr: str,
+    output_zarr_path: Optional[str] = None
+) -> str:
+    print("=" * 60)
+    print("InterSCellar: Cell-Only Volumes Computation - 3D")
+    print("=" * 60)
+    
+    import os
+    from ..core.compute_interscellar_volumes_3d import create_global_cell_only_volumes_zarr
+    
+    if output_zarr_path is None:
+        base_name = os.path.splitext(interscellar_volumes_zarr)[0]
+        if base_name.endswith('_interscellar_volumes'):
+            output_zarr_path = base_name.replace('_interscellar_volumes', '_cell_only_volumes') + '.zarr'
+        else:
+            output_zarr_path = base_name + '_cell_only_volumes.zarr'
+        print(f"Output path: {output_zarr_path}")
+    
+    if not os.path.exists(ome_zarr_path):
+        raise FileNotFoundError(f"Cell segmentation zarr not found: {ome_zarr_path}")
+    if not os.path.exists(interscellar_volumes_zarr):
+        raise FileNotFoundError(f"Interscellar volumes zarr not found: {interscellar_volumes_zarr}")
+    
+    print(f"\nInput files:")
+    print(f"Cell segmentation: {ome_zarr_path}")
+    print(f"Interscellar volumes: {interscellar_volumes_zarr}")
+    print(f"Output: {output_zarr_path}")
+    
+    try:
+        create_global_cell_only_volumes_zarr(
+            original_segmentation_zarr=ome_zarr_path,
+            interscellar_volumes_zarr=interscellar_volumes_zarr,
+            output_zarr_path=output_zarr_path
+        )
+        
+        if os.path.exists(output_zarr_path):
+            print(f"\nCell-only volumes zarr created successfully: {output_zarr_path}")
+            print("=" * 60)
+            return output_zarr_path
+        else:
+            raise RuntimeError(f"Cell-only zarr creation reported success but file not found: {output_zarr_path}")
+    except Exception as e:
+        print(f"\nError creating cell-only volumes zarr: {e}")
+        print("=" * 60)
+        raise
