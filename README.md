@@ -82,8 +82,8 @@ visualize-all-3d \
 ```sh
 visualize-pair-3d \
   --pair-id 123 \
-  --mesh-zarr "results/interscellar_volumes.zarr" \
-  --seg-zarr "data/segmentation.zarr" \
+  --cell-only-zarr "results/cell_only_volumes.zarr" \
+  --interscellar-zarr "results/interscellar_volumes.zarr" \
   --pair-opacity 0.6 \
   --cells-opacity 0.7
 ```
